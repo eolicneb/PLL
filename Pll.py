@@ -285,7 +285,7 @@ class EncAnalizador():
 
   def analisis(self, **kwargs):
     # El ususario tiene que sobreescribir esta funciÃƒÂ³n
-    print "Aca no deberias entrar"
+    print("Aca no deberias entrar")
     pass
 
 class SeguirFrec(EncAnalizador):
@@ -529,18 +529,18 @@ if __name__=='__main__':
   archivo="registro004.pkl" #
   continuar=0
   Dt=.0005  # Se rompe cuando Dt es menor a .0005
-  MAXT=10.
+  MAXT=1.
 
-  Res1=8
-  Res2=16
+  Res1=32
+  Res2=32
 
   senal=1.
   MAX_DELTA=.008
 
-  K1=1.
-  PID1=(1.,0.,.000)
-  filtro1=0.6
-  K2=1.
+  K1=.8
+  PID1=(1.,20.,.100)
+  filtro1=0.1
+  K2=1.1
   PID2=(.2,1.,.1)
 
   def target(time,t=2.,b=.0,c=.0,T=40.):
@@ -562,7 +562,7 @@ if __name__=='__main__':
              enc2=mot2.getEncoder(),
              peso=K1,
              filtro=filtro1,
-             #PID=PID1,
+             PID=PID1,
              Dt=Dt)
 
   ana3 = XORdetector(enc1=mot1.getEncoder(),
@@ -581,37 +581,46 @@ if __name__=='__main__':
             MAX_DELTA=MAX_DELTA,
             senal=senal)
 
-  # En la CajaDeZapatos se ponen los objetos cuyos
+  # En la CajaDeZapatos se ponen los objetos
   # cuyos estados se quieran guardar y recuperar.
   CajaDeZapatos=[mot1, mot2, sen]
+
+  time = 0.0
 
   if continuar:
     cosas=recuperar(archivo)
     for donde, que in zip(CajaDeZapatos, cosas[0]):
       donde.setEstado(que)
     time=cosas[1]; MAXT+=time
-  else: time=0.0
+
+  def step(time):
+    time+=Dt
+    kwargs={'time':time, 'Dt':Dt}
+    mot1.roll(senal=target(time), **kwargs)
+    mot2.roll(senal=sen(**kwargs), **kwargs)
+    enc1 = mot1.getEncoder().getPulsos(shift=.1)
+    enc2 = mot2.getEncoder().getPulsos()
+    reg = sen.senal
+    deltas = ana3.senal
+    trg = target(time)
+    return time, (reg, deltas, trg, enc1, enc2)
 
   X=[]
   reg=[]; deltas=[]; trg=[]
   enc1=[]; enc2=[]
+  lists = (reg, deltas, trg, enc1, enc2)
 
   while time<MAXT :
-    time+=Dt; X.append(time)
-    kwargs={'time':time, 'Dt':Dt}
-    mot1.roll(senal=target(time), **kwargs)
-    mot2.roll(senal=sen(**kwargs), **kwargs)
-    enc1.append( mot1.getEncoder().getPulsos(shift=.1) )
-    enc2.append( mot2.getEncoder().getPulsos() )
-    reg.append(sen.senal)
-    deltas.append(ana3.senal)
-    trg.append(target(time))
+    time, new_values = step(time)
+    X.append(time)
+    for l_, val in zip(lists, new_values):
+      l_.append(val)
 
-  print 'Finales: '
-  print 'Eje 1: ', mot1.getEstado()
-  print 'Eje 2: ', mot2.getEstado()
-  print 'Time : ', time
-  print 'Senal: ', sen.senal
+  print('Finales: ')
+  print('Eje 1: ', mot1.getEstado())
+  print('Eje 2: ', mot2.getEstado())
+  print('Time : ', time)
+  print('Senal: ', sen.senal)
 
   cosas=[]
   for de in CajaDeZapatos:
@@ -620,12 +629,39 @@ if __name__=='__main__':
   guardar(archivo, cosas)
 
   import matplotlib.pyplot as plt
+  from matplotlib.animation import FuncAnimation as FuncAn
+
   fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, sharex=True)
   A1, B1, Z1 = zip(*enc1)
   A2, B2, Z2 = zip(*enc2)
-  ax1.plot(X, A1, X, A2)
-  ax2.plot(X, deltas)
-  ax3.plot(X, trg, X, reg)
-  ax4.plot(X, Z1, X, Z2)
+  ln11, ln12 = ax1.plot(X, A1, X, A2)
+  ln2, = ax2.plot(X, deltas)
+  ln31, ln32 = ax3.plot(X, trg, X, reg)
+  ln41, ln42 = ax4.plot(X, Z1, X, Z2)
+
+  class Updater():
+    def __init__(self, time, step, batch=20):
+      self.time = time
+      self.step = step # Function to get new values
+      self.batch = batch
+    def update(self, i):
+      for _ in range(self.batch):
+        self.time, new_values = self.step(self.time)
+        for l_, val in zip(lists, new_values):
+          l_[:-1], l_[-1] = l_[1:], val
+      A1, B1, Z1 = zip(*enc1)
+      A2, B2, Z2 = zip(*enc2)
+      ln11.set_data(X, A1)
+      ln12.set_data(X, A2)
+      ln2.set_data(X, deltas)
+      ln31.set_data(X, trg)
+      ln32.set_data(X, reg)
+      ln41.set_data(X, Z1)
+      ln42.set_data(X, Z2)
+      return (ln11, ln12, ln2, ln31, ln32, ln41, ln42)
+  
+  updater = Updater(time, step, 50)
+
+  func_an = FuncAn(fig, updater.update, frames=range(100), interval=1, blit=True)
 
   plt.show()
