@@ -13,13 +13,15 @@ class Shaft():
     self.fase = fase
     self.vel = vel
     self.acel = acel
-    self.minSpeed = kwargs['minSpeed'] if ('minSpeed' in kwargs) else 0.001
+    self.minSpeed = kwargs.get('minSpeed', 0.0000001)
 
   def roll(self, torque=0., inercia=1., Dt=1.):
     self.acel = torque/inercia
     self.vel += self.acel*Dt
-    if abs(self.vel)<self.minSpeed: self.vel = 0.
+    if abs(self.vel) < self.minSpeed:
+      self.vel = 0.
     self.fase += self.vel*Dt
+    # print(f'{self.__repr__}: {self.instantanea()} con Dt={Dt}')
 
   def cin(self):
     return self.fase, self.vel, self.acel
@@ -27,14 +29,14 @@ class Shaft():
   def set(self, estado=(0.,0.,0.)):
     self.fase, self.vel, self.acel = estado
 
-  def setMinSpeed(self, minSpeed=0.001):
+  def setMinSpeed(self, minSpeed=0.0000001):
     self.minSpeed = minSpeed
 
   def getMinSpeed(self):
     return self.minSpeed
 
   def instantanea(self):
-    return [self.fase, self.vel, self.acel]
+    return self.fase, self.vel, self.acel
 
 class Torques():
   '''
@@ -44,7 +46,7 @@ class Torques():
   '''
   def __init__(self, **kwargs):
     self.torque = 0.
-    self.eje = kwargs['eje'] if 'eje' in kwargs else None
+    self.eje = kwargs.get('eje', None)
 
   def setEje(self, eje):
     self.eje = eje
@@ -55,7 +57,7 @@ class Torques():
 class TorqueDirecto(Torques):
   '''
   Implementacion de la clase Torques que devuelve
-  un torque proporcional a una senal de entrada
+  un torque proporcional a una signal de entrada
   segun una funcion de correspondencia definida
   por el usuario.
   '''
@@ -64,14 +66,15 @@ class TorqueDirecto(Torques):
       self.func = kwargs['funcionDeCorrespondencia']
     else:
       self.func = self.funcionBase
-      self.tpu = kwargs['torquePorUnidad'] if ('torquePorUnidad' in kwargs) else 1.
+      self.tpu = kwargs.get('torquePorUnidad', 1.)
 
-  def funcionBase(self, senal=0.):
-    return self.tpu*senal
+  def funcionBase(self, signal=0.):
+    return self.tpu*signal
 
   def roll(self, **kwargs):
-    senal = kwargs['senal'] if ('senal' in kwargs) else 0.
-    self.torque = self.func(senal)
+    signal = kwargs.get('signal', 0.)
+    self.torque = self.func(signal)
+    # print(f'{self.__repr__}: {self.torque} con señal {signal}')
     return self.torque
 
 class CargaVelocidad(Torques):
@@ -80,7 +83,7 @@ class CargaVelocidad(Torques):
   de giro del eje al que se le aplique.
   '''
   def __init__(self, **kwargs):
-    self.tpu = kwargs['cargaPorRadianPorSeg'] if ('cargaPorRadianPorSeg' in kwargs) else 1.
+    self.tpu = kwargs.get('cargaPorRadianPorSeg', 1.)
 
   def roll(self, **kwargs):
     if not self.eje==None:
@@ -93,20 +96,24 @@ class CargaVelocidad(Torques):
 class CargaAleatoria(Torques):
   ''' '''
   def __init__(self, **kwargs):
-    self.Dt=kwargs['Dt'] if 'Dt' in kwargs else 1.0
-    self.rand_carga=kwargs['distAleatoria'] if 'distAleatoria' in kwargs else (0.,1.)
-    self.filtro=kwargs['filtro'] if 'filtro' in kwargs else 0.0
-    self.torque=0.0
+    self.Dt = kwargs.get('Dt', 1.0)
+    self.rand_carga = kwargs.get('distAleatoria', (0.,1.))
+    self.filtro = kwargs.get('filtro', 0.0)
+    self.torque = 0.0
 
   def roll(self, **kwargs):
-    self.rand_carga=kwargs['distAleatoria'] if 'distAleatoria' in kwargs else self.rand_carga
-    self.Dt=kwargs['Dt'] if 'Dt' in kwargs else self.Dt
-    if not self.eje==None:
+    from numpy.random import normal
+
+    self.rand_carga = kwargs.get('distAleatoria', self.rand_carga)
+    self.Dt=kwargs.get('Dt', self.Dt)
+
+    if not self.eje == None:
       _, vel, _ = self.eje.cin()
-      from numpy.random import normal
       carga = -1*vel*self.Dt*normal(*self.rand_carga)**2
-    else: carga=0.0
-    self.torque=carga+self.filtro*(self.torque-carga)
+    else: 
+      carga = 0.0
+
+    self.torque = carga + self.filtro*(self.torque-carga)
     return self.torque
 
 class Inercias():
@@ -139,11 +146,11 @@ class Encoder():
     self.A = 0
     self.B = 0
     self.Z = 0
-    self.analizador = []
+    self.analizadores = []
     self.pulsos()
 
   def setAnalizador(self, analizador):
-    self.analizador.append(analizador)
+    self.analizadores.append(analizador)
 
   def getResolucion(self):
     return self.res
@@ -161,12 +168,11 @@ class Encoder():
 
   def __call__(self, **kwargs):
     self.pulsos()
-    if len(self.analizador)>0:
-      for n in self.analizador:
-        n(origen=self, **kwargs)
+    for analizador in self.analizadores:
+      analizador(origen=self, **kwargs)
 
   def getPulsos(self, **kwargs):
-    shift = kwargs['shift'] if 'shift' in kwargs else .0
+    shift = kwargs.get('shift', .0)
     return self.A+shift, self.B+shift, self.Z+shift
 
 class MotorCombo():
@@ -186,7 +192,8 @@ class MotorCombo():
     self.load()
 
   def load(self):
-    for t in self.trq: t.setEje(self.eje)
+    for t in self.trq: 
+      t.setEje(self.eje)
 
   def roll(self, Dt=0.1, **kwargs):
     torqueTotal=.0
@@ -212,60 +219,63 @@ class MotorCombo():
 class EncAnalizador():
   '''
   Clase abstracta para implementar los distintos procesos
-  de analisis de senales basado en la salida de una
-  pareja de encoders que se precisan sincronizar.
+  de analisis de signales basado en la salida de una
+  pareja de encoders que se precisa sincronizar.
   El analisis debe implementarse en la funcion analisis().
   '''
   def __init__(self, enc1, enc2, **kwargs):
-    self.output = 0.0
-    self.Dt = kwargs['Dt'] if 'Dt' in kwargs else 1.0
-    self.maxOutput = kwargs['maxOuput'] if 'maxOuput' in kwargs else 10.
     self.enc1 = enc1
     self.enc2 = enc2
+    self.output = 0.0
     self.time = 0.0
-    self.filtro = kwargs['filtro'] if 'filtro' in kwargs else 0.6
-    self.peso = kwargs['peso'] if 'peso' in kwargs else 1.0
-    self.pid = kwargs['PID'] if 'PID' in kwargs else (1., 0., 0.)
+    self.Dt = kwargs.get('Dt', 1.0)
+    self.maxOutput = kwargs.get('maxOuput', 100.)
+    self.filtro = kwargs.get('filtro', 0.6)
+    self.peso = kwargs.get('peso', 1.0)
+    self.pid = kwargs.get('PID', (1., 0., 0.))
     self.prop = 0.0
     self.integral = 0.0
     self.derivada = 0.0
-    self.senal=0.0 # Esta es la variable q el usuario debe calcular en "analisis()"
+    # Esta es la variable q el usuario debe calcular en "analisis()"
+    self.signal = 0.0 
     self.setup()
     self.initUsuario(**kwargs)
 
   def setEstado(self, registro):
     self.output=registro[0]
     self.time=registro[1]
-    self.senal=registro[2]
+    self.signal=registro[2]
     self.prop=registro[3]
     self.integral=registro[4]
     self.derivada=registro[5]
     self.setUsuario(registro[6])
 
-  def setUsuario(self, *args):
-    pass
-
   def getEstado(self):
     return [self.output,
             self.time,
-            self.senal,
+            self.signal,
             self.prop,
             self.integral,
             self.derivada,
             self.getUsuario()]
 
-  def getUsuario(self):
+  def setUsuario(self, *args):
     pass
+
+  def getUsuario(self):
+    return None
 
   def setup(self):
     self.enc1.setAnalizador(analizador=self.paraEncoder)
     self.enc2.setAnalizador(analizador=self.paraEncoder)
 
   def paraEncoder(self, **kwargs):
+    print('En EncAnalizador.paraEncoder: {}'.format(kwargs))
     if 'time' in kwargs:
-      if kwargs['time']>self.time:
+      print(' incoming time {} and own.time {}'.format(kwargs['time'], self.time))
+      if kwargs['time'] > self.time:
         self.analisis(**kwargs)
-        self.time=kwargs['time']
+        self.time = kwargs['time']
     else:
       self.analisis(**kwargs)
 
@@ -273,18 +283,20 @@ class EncAnalizador():
     pass
 
   def __call__(self, **kwargs):
-    self.senal=clip(self.senal+self.filtro*(self.output-self.senal),
-                    maximum=self.maxOutput)
-    self.derivada=(self.senal-self.prop)/self.Dt
-    self.integral=((self.senal+self.integral)%self.maxOutput)*self.Dt
-    self.prop=self.senal
-    self.output=self.pid[0]*self.prop
-    self.output+=self.pid[1]*self.integral
-    self.output+=self.pid[2]*self.derivada
-    return self.peso*clip(self.output, maximum=self.maxOutput)
+    self.Dt = kwargs.get('Dt', self.Dt)
+    self.signal = clip(self.signal+self.filtro*(self.output-self.signal),
+                        maximum=self.maxOutput)
+    self.derivada = (self.signal-self.prop)/self.Dt
+    self.integral = clip(self.signal*self.Dt+self.integral, maximum=self.maxOutput)
+    self.prop = self.signal
+    self.output = self.pid[0]*self.prop
+    self.output += self.pid[1]*self.integral
+    self.output += self.pid[2]*self.derivada
+    self.output = self.peso*clip(self.output, maximum=self.maxOutput)
+    return self.output
 
   def analisis(self, **kwargs):
-    # El ususario tiene que sobreescribir esta funciÃƒÂ³n
+    # This function must be overriden in derived classes
     print("Aca no deberias entrar")
     pass
 
@@ -294,10 +306,10 @@ class SeguirFrec(EncAnalizador):
   def initUsuario(self, **kwargs):
     self.flancoAnterior=[0.0, 0.0]
     self.pulsoAnterior=[1, 1]
-    self.periodo1=10000000000.0
-    self.periodo2=10000000000.0
+    self.periodo1=1e128
+    self.periodo2=1e128
     self.output=0.0
-    self.pulsoReferencia=kwargs['referencia'] if 'referencia' in kwargs else 0
+    self.pulsoReferencia=kwargs.get('referencia', 0)
 
   def getUsuario(self):
     bag = [self.flancoAnterior,
@@ -315,34 +327,36 @@ class SeguirFrec(EncAnalizador):
     self.pulsoReferencia=registro[4]
 
   def analisis(self,**kwargs):
-    time=kwargs['time'] if 'time' in kwargs else self.time
+    print('En SeguirFrec.analisis: {}'.format(kwargs))
+    time = kwargs.get('time', self.time)
     ixP=self.pulsoReferencia
     p1 = self.enc1.getPulsos()
     p2 = self.enc2.getPulsos()
-    flanco1=p1[ixP]-self.pulsoAnterior[0]
-    if flanco1>0:
-      self.periodo1=(time-self.flancoAnterior[0])*self.enc1.getResolucion()
-      self.flancoAnterior[0]=time
-    flanco2=p2[ixP]-self.pulsoAnterior[1]
-    if flanco2>0:
-      self.periodo2=(time-self.flancoAnterior[1])*self.enc2.getResolucion()
-      self.flancoAnterior[1]=time
-    self.pulsoAnterior[0]=p1[ixP]
-    self.pulsoAnterior[1]=p2[ixP]
-    self.senal=self.periodo2-self.periodo1
+    flanco1 = p1[ixP]-self.pulsoAnterior[0]
+    if flanco1 > 0:
+      self.periodo1 = (time-self.flancoAnterior[0])*self.enc1.getResolucion()
+      self.flancoAnterior[0] = time
+    flanco2 = p2[ixP]-self.pulsoAnterior[1]
+    if flanco2 > 0:
+      self.periodo2 = (time-self.flancoAnterior[1])*self.enc2.getResolucion()
+      self.flancoAnterior[1] = time
+    self.pulsoAnterior[0] = p1[ixP]
+    self.pulsoAnterior[1] = p2[ixP]
+    self.signal = self.periodo2-self.periodo1
 
 class PID(EncAnalizador):
   ''' '''
   def initUsuario(self, **kwargs):
-    self.flancoAnterior=[.0, .0]
-    self.pulsoAnterior=[1, 1]
-    self.periodo=[10000.0, 10000.0]
-    self.encoders=[self.enc1, self.enc2]
+    self.flancoAnterior = [.0, .0]
+    self.pulsoAnterior = [1, 1]
+    self.periodo = [10000.0, 10000.0]
+    self.channel = kwargs.get('channel', 0)
+    self.encoders = [self.enc1, self.enc2]
 
   def setUsuario(self, registro):
-    self.flancoAnterior=registro[0]
-    self.pulsoAnterior=registro[1]
-    self.periodo=registro[2]
+    self.flancoAnterior = registro[0]
+    self.pulsoAnterior = registro[1]
+    self.periodo = registro[2]
 
   def getUsuario(self):
     return [self.flancoAnterior,
@@ -350,14 +364,16 @@ class PID(EncAnalizador):
             self.periodo]
 
   def analisis(self,**kwargs):
-    time=kwargs['time'] if 'time' in kwargs else self.time
+    print('En PID.analisis: {}'.format(kwargs))
+    time=kwargs.get('time', self.time)
     for n, enc in enumerate(self.encoders):
-      p=enc.getPulsos()
-      flanco=p[0]-self.pulsoAnterior[n]; self.pulsoAnterior[n]=p[0]
-      if flanco>0:
-        self.periodo[n]=(time-self.flancoAnterior[n])*enc.getResolucion()
-        self.flancoAnterior[n]=time
-    self.senal=self.periodo[1]-self.periodo[0]
+      p = enc.getPulsos()
+      flanco = p[self.channel]-self.pulsoAnterior[n]
+      self.pulsoAnterior[n] = p[self.channel]
+      if flanco > 0:
+        self.periodo[n] = (time-self.flancoAnterior[n])*enc.getResolucion()
+        self.flancoAnterior[n] = time
+    self.signal = self.periodo[1]-self.periodo[0]
 
 class EnFase(EncAnalizador):
   ''' '''
@@ -387,34 +403,38 @@ class EnFase(EncAnalizador):
     return bag
 
   def analisis(self, **kwargs):
-    time=kwargs['time'] if 'time' in kwargs else self.time
-    Dt=kwargs['Dt'] if 'Dt' in kwargs else 1./self.maxOuput
+    print('En EnFase.analisis: {}'.format(kwargs))
+    time = kwargs.get('time', self.time)
+    Dt = kwargs.get('Dt', 1./self.maxOutput)
     elOtro=[1, 0]
     desfase=self.output
     for n, enc in enumerate(self.encoders):
       p=enc.getPulsos()
-      flanco=p[2]-self.pulsoAnterior[n]; self.pulsoAnterior[n]=p[2]
+      flanco = p[2]-self.pulsoAnterior[n]
+      self.pulsoAnterior[n] = p[2]
       if flanco>0:
-        self.periodo[n]=((-1)**n)*(time-self.flancoAnterior[elOtro[n]])
+        self.periodo[n] = ((-1)**n)*(time-self.flancoAnterior[elOtro[n]])
       from math import fabs, copysign
-      if fabs(desfase)<fabs(self.periodo[elOtro[n]]):
-        desfase=desfase
-      else: desfase=self.periodo[elOtro[n]]
+      if fabs(desfase) < fabs(self.periodo[elOtro[n]]):
+        desfase = desfase
+      else:
+        desfase = self.periodo[elOtro[n]]
       desfase=1./copysign(max(fabs(desfase),Dt),desfase)
-    self.output=desfase+self.filtro*(self.output-desfase)
+    self.output = desfase+self.filtro*(self.output-desfase)
 
 class FaseDetector(EncAnalizador):
   '''
   '''
   def initUsuario(self, **kwargs):
-    time=kwargs['time'] if 'time' in kwargs else 0.0
+    time = kwargs.get('time', 0.0)
     self.flancoAnterior=[time, time]
     self.pulsoAnterior=[0, 0]
     self.periodo1=1.0
     self.periodo2=1.0
     self.desfase1=0.0
     self.desfase2=0.0
-    self.pulsoReferencia=kwargs['referencia'] if 'referencia' in kwargs else 0
+    self.pulsoReferencia = kwargs.get('referencia', 0)
+    self.zero_safe = .00000001
 
   def getEstado(self):
     return [self.flancoAnterior,
@@ -435,7 +455,8 @@ class FaseDetector(EncAnalizador):
     self.pulsoReferencia=registro[6]
 
   def analisis(self,**kwargs):
-    time=kwargs['time'] if 'time' in kwargs else self.time
+    print('En FaseDetector.analisis: {}'.format(kwargs))
+    time = kwargs.get('time', self.time)
     ixP=self.pulsoReferencia
     p1 = self.enc1.getPulsos()
     p2 = self.enc2.getPulsos()
@@ -453,12 +474,14 @@ class FaseDetector(EncAnalizador):
     self.pulsoAnterior[0]=p1[ixP]
     self.pulsoAnterior[1]=p2[ixP]
     # Filtro pasabajos:
-    self.senal = self.desfase2-self.desfase1
+    self.desfase1 += self.zero_safe
+    self.desfase2 += self.zero_safe
+    self.signal = -self.desfase2**(-2)+self.desfase1**(-2)
 
 class XORdetector(EncAnalizador):
     ''' '''
     def initUsuario(self, **kwargs):
-      self.pulsoReferencia=kwargs['referencia'] if 'referencia' in kwargs else 0
+      self.pulsoReferencia=kwargs.get('referencia', 0)
 
     def getEstado(self):
       return [self.pulsoReferencia]
@@ -467,12 +490,23 @@ class XORdetector(EncAnalizador):
       self.pulsoReferencia=registro[0]
 
     def analisis(self, **kwargs):
+      print('En XORdetector.analisis: {}'.format(kwargs))
       ixP = self.pulsoReferencia
       p1 = self.enc1.getPulsos()
       p2 = self.enc2.getPulsos()
-      self.senal = -1 if p1[ixP]==p2[ixP] else 1
+      self.signal = -1 if p1[ixP]==p2[ixP] else 1
 
-class Senal():
+# class MagnticPhase(EncAnalizador):
+#   """
+#   Subtracts the square of the distance of the later to the previous
+#   other encoder's pulse as if magnetically atracted.
+#   """
+#   def initUsuario(self, **kwargs):
+#     self.channel = kwargs('channel', 2)
+
+  
+
+class Signal():
   '''
   Una clase que compone todos los analizadores utilizados
   y devuelve una unica señal para insertar en el motor
@@ -480,72 +514,85 @@ class Senal():
   '''
   def __init__(self, analizadores, **kwargs):
     self.lista=analizadores
-    self.senal=kwargs['senal'] if 'senal' in kwargs else 0.0
+    self.signal=kwargs.get('signal', 0.0)
     self.delta=0.0
-    self.MAX_DELTA=kwargs['MAX_DELTA'] if 'MAX_DELTA' in kwargs else False
+    self.MAX_DELTA=kwargs.get('MAX_DELTA', False)
 
   def __call__(self, **kwargs):
-    Dt=kwargs['Dt'] if 'Dt' in kwargs else 1.
-    delta=0.0
+    Dt = kwargs.get('Dt', 1.)
+    delta = 0.0
     for am in self.lista:
-      delta+=am(**kwargs)
-    self.delta=clip(delta, maximum=self.MAX_DELTA/Dt)
-    self.senal+=self.delta*Dt
-    return self.senal
+      delta += am(**kwargs)
+    self.delta = clip(delta, maximum=self.MAX_DELTA*Dt) if self.MAX_DELTA else delta
+    self.signal += self.delta*Dt
+    self.signal = max((self.signal, 0.))
+    # print(self.delta*Dt, self.signal)
+    return self.signal
 
   def getEstado(self):
     bag = [ am.getEstado() for am in self.lista ]
-    return [ bag, self.senal, self.delta ]
+    return [ bag, self.signal, self.delta ]
 
   def setEstado(self, registro):
-    for am, reg in zip(self.lista, registro[0]):
+    bag, self.signal, self.delta = registro
+    for am, reg in zip(self.lista, bag):
       am.setEstado(reg)
-    self.senal=registro[1]
-    self.delta=registro[2]
 
 def clip(o, maximum=False, minimum=False):
   from math import copysign, fabs
-  ret=o
-  if maximum: ret=copysign(min([fabs(ret), fabs(maximum)]),ret)
-  if minimum: ret=copysign(max([fabs(ret), fabs(minimum)]),ret)
+  ret = o
+  if maximum:
+    ret = copysign(min([fabs(ret), fabs(maximum)]), ret)
+  if minimum:
+    ret = copysign(max([fabs(ret), fabs(minimum)]), ret)
   return ret
 
-def guardar(archivo, cosas):
+def pickle_save(pickle_file, cosas):
   from pickle import dump
-  f=open(archivo, 'wb')
-  dump(cosas, f)
-  f.close()
+  with open(pickle_file, 'wb') as f:
+    dump(cosas, f)
 
-def recuperar(archivo):
+def pickle_load(pickle_file):
   from pickle import load
-  f=open(archivo, 'rb')
-  cosas=load(f)
-  f.close()
-  return cosas
+  with open(pickle_file, 'rb') as f:
+    cosas=load(f)
+    return cosas
 
 # Final de las declaraciones de Clases y Funciones
+
 if __name__=='__main__':
 
-  archivo="registro004.pkl" #
+  pickle_file = "registro005.pkl" #
   continuar=0
-  Dt=.0005  # Se rompe cuando Dt es menor a .0005
-  MAXT=1.
+  Dt=.01
+  MAXT=2
 
-  Res1=32
-  Res2=32
+  Res1=16
+  Res2=16
 
-  senal=1.
-  MAX_DELTA=.008
+  signal=1.
+  MAX_DELTA=100.
 
-  K1=.8
-  PID1=(1.,20.,.100)
-  filtro1=0.1
-  K2=1.1
-  PID2=(.2,1.,.1)
+  # PID on channel A
+  K1 = 1.e1
+  PID1 = (.05, 0., .0)
+  filtro1 = 0.0
+  # FaseDetector on channel C
+  K2=0.e2
+  PID2=(1.,0.,0.01)
+  filtro2 = 0.1
+  # EnFase on channel C
+  K3=0.e4
+  PID3=(1.,.0,.0)
+  filtro3 = 0.1
+  # PID on channel C
+  K4=0.e1
+  PID4=(1.,.1,0.)
+  filtro4 = 0.6
 
-  def target(time,t=2.,b=.0,c=.0,T=40.):
+  def target(time,t=.2,b=.0,c=.1,T=200.):
     from math import sin
-    return t*(1+b*time**2/MAXT**2)+c*sin(time*6.28/T)
+    return t*(1+b*time**2/MAXT**2)+c*sin(time*6.28/T)**2
 
   mot1 = MotorCombo(Res1,
                     [ TorqueDirecto(),
@@ -565,21 +612,31 @@ if __name__=='__main__':
              PID=PID1,
              Dt=Dt)
 
-  ana3 = XORdetector(enc1=mot1.getEncoder(),
-                    enc2=mot2.getEncoder(),
-                    peso=K1,
-                    PID=PID1,
-                    Dt=Dt)
-
   ana2 = FaseDetector(enc1=mot1.getEncoder(),
-                enc2=mot2.getEncoder(),
-                peso=K2,
-                PID=PID2,
-                Dt=Dt )
+                      enc2=mot2.getEncoder(),
+                      peso=K2,
+                      PID=PID2,
+                      referencia=2,
+                      Dt=Dt)
 
-  sen=Senal([ana1, ana2],
-            MAX_DELTA=MAX_DELTA,
-            senal=senal)
+  # ana3 = EnFase(enc1=mot1.getEncoder(),
+  #               enc2=mot2.getEncoder(),
+  #               peso=K3,
+  #               PID=PID3,
+  #               filtro=filtro3,
+  #               Dt=Dt)
+
+  # ana4 = PID(enc1=mot1.getEncoder(),
+  #            enc2=mot2.getEncoder(),
+  #            channel=2,
+  #            peso=K2,
+  #            filtro=filtro2,
+  #            PID=PID2,
+  #            Dt=Dt)
+
+  sen=Signal([ana1], # , ana2, ana3, ana4
+              MAX_DELTA=MAX_DELTA,
+              signal=signal)
 
   # En la CajaDeZapatos se ponen los objetos
   # cuyos estados se quieran guardar y recuperar.
@@ -588,27 +645,31 @@ if __name__=='__main__':
   time = 0.0
 
   if continuar:
-    cosas=recuperar(archivo)
+    cosas=pickle_load(pickle_file)
     for donde, que in zip(CajaDeZapatos, cosas[0]):
       donde.setEstado(que)
-    time=cosas[1]; MAXT+=time
+    time = cosas[1]
+    MAXT += time
 
   def step(time):
     time+=Dt
     kwargs={'time':time, 'Dt':Dt}
-    mot1.roll(senal=target(time), **kwargs)
-    mot2.roll(senal=sen(**kwargs), **kwargs)
+    trg = target(time)
+    reg = sen(**kwargs)
+    mot1.roll(signal=trg, **kwargs)
+    mot2.roll(signal=reg, **kwargs)
     enc1 = mot1.getEncoder().getPulsos(shift=.1)
     enc2 = mot2.getEncoder().getPulsos()
-    reg = sen.senal
-    deltas = ana3.senal
-    trg = target(time)
-    return time, (reg, deltas, trg, enc1, enc2)
+    integral = ana1.integral
+    derivat = ana1.derivada
+    prop = ana1.prop
+    return time, (reg, integral, derivat, prop, trg, enc1, enc2)
 
   X=[]
-  reg=[]; deltas=[]; trg=[]
+  integral=[]; derivat = []; prop = []
+  reg=[]; trg=[]
   enc1=[]; enc2=[]
-  lists = (reg, deltas, trg, enc1, enc2)
+  lists = (reg, integral, derivat, prop, trg, enc1, enc2)
 
   while time<MAXT :
     time, new_values = step(time)
@@ -620,48 +681,61 @@ if __name__=='__main__':
   print('Eje 1: ', mot1.getEstado())
   print('Eje 2: ', mot2.getEstado())
   print('Time : ', time)
-  print('Senal: ', sen.senal)
+  print('Signal: ', sen.signal)
 
-  cosas=[]
-  for de in CajaDeZapatos:
-    cosas.append(de.getEstado())
-  cosas=[cosas, time]
-  guardar(archivo, cosas)
+  cosas = [de.getEstado() for de in CajaDeZapatos]
+  cosas += [time]
+  pickle_save(pickle_file, cosas)
 
   import matplotlib.pyplot as plt
   from matplotlib.animation import FuncAnimation as FuncAn
 
-  fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, sharex=True)
+  fig, (ax1, ax2, ax3, ax4, _) = plt.subplots(5, 1, sharex=True)
+  ax2.set_ylim(-MAX_DELTA*1.1,MAX_DELTA*1.1)
+  ax5 = fig.add_subplot(529, projection='polar')
+  ax6 = fig.add_subplot(5,2,10, projection='polar')
   A1, B1, Z1 = zip(*enc1)
   A2, B2, Z2 = zip(*enc2)
   ln11, ln12 = ax1.plot(X, A1, X, A2)
-  ln2, = ax2.plot(X, deltas)
+  ln21, ln22, ln23 = ax2.plot(X, integral, X, derivat, X, prop)
   ln31, ln32 = ax3.plot(X, trg, X, reg)
   ln41, ln42 = ax4.plot(X, Z1, X, Z2)
+  ln5, = ax5.plot((mot1.eje.fase,)*2, (.1,1.), 'tab:blue')
+  ln6, = ax6.plot((mot2.eje.fase,)*2, (.1,1.), 'tab:orange')
 
   class Updater():
     def __init__(self, time, step, batch=20):
       self.time = time
       self.step = step # Function to get new values
       self.batch = batch
+
     def update(self, i):
       for _ in range(self.batch):
         self.time, new_values = self.step(self.time)
         for l_, val in zip(lists, new_values):
-          l_[:-1], l_[-1] = l_[1:], val
+          l_[:] = l_[1:]+[val]
+      fase1, fase2 = mot1.eje.fase, mot2.eje.fase
+
       A1, B1, Z1 = zip(*enc1)
       A2, B2, Z2 = zip(*enc2)
       ln11.set_data(X, A1)
       ln12.set_data(X, A2)
-      ln2.set_data(X, deltas)
+      ln21.set_data(X, integral)
+      ln22.set_data(X, derivat)
+      ln23.set_data(X, prop)
       ln31.set_data(X, trg)
       ln32.set_data(X, reg)
+      # ax3.autoscale(enable=True, axis='y')
+      ax3.set_ylim(-.2+min(min(trg),min(reg)),.2+max(max(trg),max(reg)))
       ln41.set_data(X, Z1)
       ln42.set_data(X, Z2)
-      return (ln11, ln12, ln2, ln31, ln32, ln41, ln42)
-  
-  updater = Updater(time, step, 50)
+      ln5.set_data((fase1,)*2, (.1,1.))
+      ln6.set_data((fase2,)*2, (.1,1.)) 
 
-  func_an = FuncAn(fig, updater.update, frames=range(100), interval=1, blit=True)
+      return (ln11, ln12, ln21, ln22, ln23, ln31, ln32, ln41, ln42, ln5, ln6)
+  
+  updater = Updater(time, step, 30)
+
+  func_an = FuncAn(fig, updater.update, frames=range(100), interval=20, blit=True)
 
   plt.show()
