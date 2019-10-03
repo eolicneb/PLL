@@ -1,5 +1,12 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*
+
+import logging
+
+logging.basicConfig(level=logging.DEBUG if __debug__ else logging.INFO)
+
+
+
 class Shaft():
   '''
   Esta clase encapsula las condiciones cinematicas del eje.
@@ -21,7 +28,7 @@ class Shaft():
     if abs(self.vel) < self.minSpeed:
       self.vel = 0.
     self.fase += self.vel*Dt
-    # print(f'{self.__repr__}: {self.instantanea()} con Dt={Dt}')
+    # logging.debug(f'{self.__repr__}: {self.instantanea()} con Dt={Dt}')
 
   def cin(self):
     return self.fase, self.vel, self.acel
@@ -74,7 +81,7 @@ class TorqueDirecto(Torques):
   def roll(self, **kwargs):
     signal = kwargs.get('signal', 0.)
     self.torque = self.func(signal)
-    # print(f'{self.__repr__}: {self.torque} con señal {signal}')
+    # logging.debug(f'{self.__repr__}: {self.torque} con señal {signal}')
     return self.torque
 
 class CargaVelocidad(Torques):
@@ -241,6 +248,22 @@ class EncAnalizador():
     self.setup()
     self.initUsuario(**kwargs)
 
+  def __call__(self, **kwargs):
+    """
+    A PID adjustmen is performed here.
+    """
+    self.Dt = kwargs.get('Dt', self.Dt)
+    self.signal = clip(self.signal+self.filtro*(self.output-self.signal),
+                        maximum=self.maxOutput)
+    self.derivada = (self.signal-self.prop)/self.Dt
+    self.integral = clip(self.signal*self.Dt+self.integral, maximum=self.maxOutput)
+    self.prop = self.signal
+    self.output = self.pid[0]*self.prop
+    self.output += self.pid[1]*self.integral
+    self.output += self.pid[2]*self.derivada
+    self.output = self.peso*clip(self.output, maximum=self.maxOutput)
+    return self.output
+
   def setEstado(self, registro):
     self.output=registro[0]
     self.time=registro[1]
@@ -259,6 +282,9 @@ class EncAnalizador():
             self.derivada,
             self.getUsuario()]
 
+  def initUsuario(self, **kwargs):
+    pass
+
   def setUsuario(self, *args):
     pass
 
@@ -270,34 +296,18 @@ class EncAnalizador():
     self.enc2.setAnalizador(analizador=self.paraEncoder)
 
   def paraEncoder(self, **kwargs):
-    print('En EncAnalizador.paraEncoder: {}'.format(kwargs))
+    logging.debug('En EncAnalizador.paraEncoder: {}'.format(kwargs))
     if 'time' in kwargs:
-      print(' incoming time {} and own.time {}'.format(kwargs['time'], self.time))
+      logging.debug(' incoming time {} and own.time {}'.format(kwargs['time'], self.time))
       if kwargs['time'] > self.time:
         self.analisis(**kwargs)
         self.time = kwargs['time']
     else:
       self.analisis(**kwargs)
 
-  def initUsuario(self, **kwargs):
-    pass
-
-  def __call__(self, **kwargs):
-    self.Dt = kwargs.get('Dt', self.Dt)
-    self.signal = clip(self.signal+self.filtro*(self.output-self.signal),
-                        maximum=self.maxOutput)
-    self.derivada = (self.signal-self.prop)/self.Dt
-    self.integral = clip(self.signal*self.Dt+self.integral, maximum=self.maxOutput)
-    self.prop = self.signal
-    self.output = self.pid[0]*self.prop
-    self.output += self.pid[1]*self.integral
-    self.output += self.pid[2]*self.derivada
-    self.output = self.peso*clip(self.output, maximum=self.maxOutput)
-    return self.output
-
   def analisis(self, **kwargs):
     # This function must be overriden in derived classes
-    print("Aca no deberias entrar")
+    logging.info("Aca no deberias entrar")
     pass
 
 class SeguirFrec(EncAnalizador):
@@ -327,7 +337,7 @@ class SeguirFrec(EncAnalizador):
     self.pulsoReferencia=registro[4]
 
   def analisis(self,**kwargs):
-    print('En SeguirFrec.analisis: {}'.format(kwargs))
+    logging.debug('En SeguirFrec.analisis: {}'.format(kwargs))
     time = kwargs.get('time', self.time)
     ixP=self.pulsoReferencia
     p1 = self.enc1.getPulsos()
@@ -364,7 +374,7 @@ class PID(EncAnalizador):
             self.periodo]
 
   def analisis(self,**kwargs):
-    print('En PID.analisis: {}'.format(kwargs))
+    logging.debug('En PID.analisis: {}'.format(kwargs))
     time=kwargs.get('time', self.time)
     for n, enc in enumerate(self.encoders):
       p = enc.getPulsos()
@@ -403,7 +413,7 @@ class EnFase(EncAnalizador):
     return bag
 
   def analisis(self, **kwargs):
-    print('En EnFase.analisis: {}'.format(kwargs))
+    logging.debug('En EnFase.analisis: {}'.format(kwargs))
     time = kwargs.get('time', self.time)
     Dt = kwargs.get('Dt', 1./self.maxOutput)
     elOtro=[1, 0]
@@ -455,7 +465,7 @@ class FaseDetector(EncAnalizador):
     self.pulsoReferencia=registro[6]
 
   def analisis(self,**kwargs):
-    print('En FaseDetector.analisis: {}'.format(kwargs))
+    logging.debug('En FaseDetector.analisis: {}'.format(kwargs))
     time = kwargs.get('time', self.time)
     ixP=self.pulsoReferencia
     p1 = self.enc1.getPulsos()
@@ -490,7 +500,7 @@ class XORdetector(EncAnalizador):
       self.pulsoReferencia=registro[0]
 
     def analisis(self, **kwargs):
-      print('En XORdetector.analisis: {}'.format(kwargs))
+      logging.debug('En XORdetector.analisis: {}'.format(kwargs))
       ixP = self.pulsoReferencia
       p1 = self.enc1.getPulsos()
       p2 = self.enc2.getPulsos()
@@ -526,7 +536,7 @@ class Signal():
     self.delta = clip(delta, maximum=self.MAX_DELTA*Dt) if self.MAX_DELTA else delta
     self.signal += self.delta*Dt
     self.signal = max((self.signal, 0.))
-    # print(self.delta*Dt, self.signal)
+    # logging.debug(self.delta*Dt, self.signal)
     return self.signal
 
   def getEstado(self):
@@ -677,11 +687,11 @@ if __name__=='__main__':
     for l_, val in zip(lists, new_values):
       l_.append(val)
 
-  print('Finales: ')
-  print('Eje 1: ', mot1.getEstado())
-  print('Eje 2: ', mot2.getEstado())
-  print('Time : ', time)
-  print('Signal: ', sen.signal)
+  logging.info("\nFinales: "+
+                "\nEje 1: {}".format(mot1.getEstado())+
+                "\nEje 2: {}".format(mot2.getEstado())+
+                "\nTime : {}".format(time)+
+                "\nSignal: {}".format(sen.signal))
 
   cosas = [de.getEstado() for de in CajaDeZapatos]
   cosas += [time]
