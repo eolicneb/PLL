@@ -362,6 +362,9 @@ class PID(EncAnalizador):
     self.periodo = [10000.0, 10000.0]
     self.channel = kwargs.get('channel', 0)
     self.encoders = [self.enc1, self.enc2]
+    self.dir = {'sign':-1, 'ref':0} \
+                if self.channel == 1 \
+                else {'sign':1, 'ref':1}
 
   def setUsuario(self, registro):
     self.flancoAnterior = registro[0]
@@ -381,9 +384,10 @@ class PID(EncAnalizador):
       flanco = p[self.channel]-self.pulsoAnterior[n]
       self.pulsoAnterior[n] = p[self.channel]
       if flanco > 0:
-        self.periodo[n] = (time-self.flancoAnterior[n])*enc.getResolucion()
+        sign = self.dir['sign'] if p[self.dir['ref']] == 0 else -self.dir['sign']
+        self.periodo[n] = (time-self.flancoAnterior[n])*enc.getResolucion()*sign
         self.flancoAnterior[n] = time
-    self.signal = self.periodo[1]-self.periodo[0]
+    self.signal = 1./self.periodo[0]-1./self.periodo[1] # self.periodo[1]-self.periodo[0] # 
 
 class EnFase(EncAnalizador):
   ''' '''
@@ -535,7 +539,7 @@ class Signal():
       delta += am(**kwargs)
     self.delta = clip(delta, maximum=self.MAX_DELTA*Dt) if self.MAX_DELTA else delta
     self.signal += self.delta*Dt
-    self.signal = max((self.signal, 0.))
+    # self.signal = max((self.signal, 0.))
     # logging.debug(self.delta*Dt, self.signal)
     return self.signal
 
@@ -574,8 +578,8 @@ if __name__=='__main__':
 
   pickle_file = "registro005.pkl" #
   continuar=0
-  Dt=.01
-  MAXT=2
+  Dt=.05
+  MAXT=20
 
   Res1=16
   Res2=16
@@ -584,13 +588,13 @@ if __name__=='__main__':
   MAX_DELTA=100.
 
   # PID on channel A
-  K1 = 1.e1
-  PID1 = (.05, 0., .0)
+  K1 = 1.e0
+  PID1 = (.8, .3, .0)
   filtro1 = 0.0
   # FaseDetector on channel C
-  K2=0.e2
-  PID2=(1.,0.,0.01)
-  filtro2 = 0.1
+  K2=.1e-1
+  PID2=(1.,0.4,0.01)
+  filtro2 = 0.0
   # EnFase on channel C
   K3=0.e4
   PID3=(1.,.0,.0)
@@ -600,7 +604,7 @@ if __name__=='__main__':
   PID4=(1.,.1,0.)
   filtro4 = 0.6
 
-  def target(time,t=.2,b=.0,c=.1,T=200.):
+  def target(time,t=.2,b=.0,c=.15,T=1000.):
     from math import sin
     return t*(1+b*time**2/MAXT**2)+c*sin(time*6.28/T)**2
 
@@ -670,9 +674,9 @@ if __name__=='__main__':
     mot2.roll(signal=reg, **kwargs)
     enc1 = mot1.getEncoder().getPulsos(shift=.1)
     enc2 = mot2.getEncoder().getPulsos()
-    integral = ana1.integral
-    derivat = ana1.derivada
-    prop = ana1.prop
+    integral = ana2.integral
+    derivat = ana2.derivada
+    prop = ana2.prop
     return time, (reg, integral, derivat, prop, trg, enc1, enc2)
 
   X=[]
@@ -701,7 +705,7 @@ if __name__=='__main__':
   from matplotlib.animation import FuncAnimation as FuncAn
 
   fig, (ax1, ax2, ax3, ax4, _) = plt.subplots(5, 1, sharex=True)
-  ax2.set_ylim(-MAX_DELTA*1.1,MAX_DELTA*1.1)
+  ax2.set_ylim(-1.1,1.1)
   ax5 = fig.add_subplot(529, projection='polar')
   ax6 = fig.add_subplot(5,2,10, projection='polar')
   A1, B1, Z1 = zip(*enc1)
