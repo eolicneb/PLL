@@ -1,9 +1,20 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*
+import numpy as np
 
 import logging
+import sys
 
-logging.basicConfig(level=logging.DEBUG if __debug__ else logging.INFO)
+logger = logging.getLogger(__name__)
+stdout_hdlr = logging.StreamHandler(sys.stdout)
+stdout_hdlr.setLevel(logging.INFO)
+logger.addHandler(stdout_hdlr)
+logger.addHandler(logging.FileHandler('debug.txt', mode='w'))
+logger.setLevel(logging.DEBUG if __debug__ else logging.INFO)
+
+log_counter = logging.getLogger(__name__+'_counter')
+log_counter.addHandler(logging.FileHandler('pulse_counter.debug',mode='w'))
+log_counter.setLevel(logging.DEBUG if __debug__ else logging.INFO)
 
 
 
@@ -28,7 +39,7 @@ class Shaft():
     if abs(self.vel) < self.minSpeed:
       self.vel = 0.
     self.fase += self.vel*Dt
-    # logging.debug(f'{self.__repr__}: {self.instantanea()} con Dt={Dt}')
+    # logger.debug(f'{self.__repr__}: {self.instantanea()} con Dt={Dt}')
 
   def cin(self):
     return self.fase, self.vel, self.acel
@@ -81,7 +92,7 @@ class TorqueDirecto(Torques):
   def roll(self, **kwargs):
     signal = kwargs.get('signal', 0.)
     self.torque = self.func(signal)
-    # logging.debug(f'{self.__repr__}: {self.torque} con señal {signal}')
+    # logger.debug(f'{self.__repr__}: {self.torque} con señal {signal}')
     return self.torque
 
 class CargaVelocidad(Torques):
@@ -226,7 +237,7 @@ class MotorCombo():
 class EncAnalizador():
   '''
   Clase abstracta para implementar los distintos procesos
-  de analisis de signales basado en la salida de una
+  de analisis de seniales basado en la salida de una
   pareja de encoders que se precisa sincronizar.
   El analisis debe implementarse en la funcion analisis().
   '''
@@ -250,14 +261,22 @@ class EncAnalizador():
 
   def __call__(self, **kwargs):
     """
-    A PID adjustmen is performed here.
+    A PID adjustment is performed here.
     """
     self.Dt = kwargs.get('Dt', self.Dt)
-    self.signal = clip(self.signal+self.filtro*(self.output-self.signal),
-                        maximum=self.maxOutput)
-    self.derivada = (self.signal-self.prop)/self.Dt
-    self.integral = clip(self.signal*self.Dt+self.integral, maximum=self.maxOutput)
-    self.prop = self.signal
+    # self.signal = clip(self.signal+self.filtro*(self.output-self.signal),
+    #                     maximum=self.maxOutput)
+    prop = self.signal
+    derivada = (self.signal-self.prop)/self.Dt
+    if prop * self.prop < 0:
+      integral = self.integral = .0
+    else:
+      integral = clip(self.signal*self.Dt+self.integral, maximum=self.maxOutput)
+    
+    self.derivada = derivada + self.filtro*(self.derivada-derivada)
+    self.integral = integral + self.filtro*(self.integral-integral)
+    self.prop = prop + self.filtro*(self.prop-prop)
+
     self.output = self.pid[0]*self.prop
     self.output += self.pid[1]*self.integral
     self.output += self.pid[2]*self.derivada
@@ -296,9 +315,9 @@ class EncAnalizador():
     self.enc2.setAnalizador(analizador=self.paraEncoder)
 
   def paraEncoder(self, **kwargs):
-    logging.debug('En EncAnalizador.paraEncoder: {}'.format(kwargs))
+    logger.debug('En EncAnalizador.paraEncoder: {}'.format(kwargs))
     if 'time' in kwargs:
-      logging.debug(' incoming time {} and own.time {}'.format(kwargs['time'], self.time))
+      logger.debug(' incoming time {} and own.time {}'.format(kwargs['time'], self.time))
       if kwargs['time'] > self.time:
         self.analisis(**kwargs)
         self.time = kwargs['time']
@@ -307,7 +326,7 @@ class EncAnalizador():
 
   def analisis(self, **kwargs):
     # This function must be overriden in derived classes
-    logging.info("Aca no deberias entrar")
+    logger.info("Aca no deberias entrar")
     pass
 
 class SeguirFrec(EncAnalizador):
@@ -337,7 +356,7 @@ class SeguirFrec(EncAnalizador):
     self.pulsoReferencia=registro[4]
 
   def analisis(self,**kwargs):
-    logging.debug('En SeguirFrec.analisis: {}'.format(kwargs))
+    logger.debug('En SeguirFrec.analisis: {}'.format(kwargs))
     time = kwargs.get('time', self.time)
     ixP=self.pulsoReferencia
     p1 = self.enc1.getPulsos()
@@ -377,7 +396,7 @@ class PID(EncAnalizador):
             self.periodo]
 
   def analisis(self,**kwargs):
-    logging.debug('En PID.analisis: {}'.format(kwargs))
+    logger.debug('En PID.analisis: {}'.format(kwargs))
     time=kwargs.get('time', self.time)
     for n, enc in enumerate(self.encoders):
       p = enc.getPulsos()
@@ -417,7 +436,7 @@ class EnFase(EncAnalizador):
     return bag
 
   def analisis(self, **kwargs):
-    logging.debug('En EnFase.analisis: {}'.format(kwargs))
+    logger.debug('En EnFase.analisis: {}'.format(kwargs))
     time = kwargs.get('time', self.time)
     Dt = kwargs.get('Dt', 1./self.maxOutput)
     elOtro=[1, 0]
@@ -469,17 +488,19 @@ class FaseDetector(EncAnalizador):
     self.pulsoReferencia=registro[6]
 
   def analisis(self,**kwargs):
-    logging.debug('En FaseDetector.analisis: {}'.format(kwargs))
+    logger.debug('En FaseDetector.analisis: {}'.format(kwargs))
     time = kwargs.get('time', self.time)
     ixP=self.pulsoReferencia
     p1 = self.enc1.getPulsos()
     p2 = self.enc2.getPulsos()
     lastTime = max(self.flancoAnterior)
+
     flanco1=p1[ixP]-self.pulsoAnterior[0]
     if flanco1>0:
       self.periodo1=time-self.flancoAnterior[0]
       self.desfase1=time-self.flancoAnterior[1]
       self.flancoAnterior[0]=time
+
     flanco2=p2[ixP]-self.pulsoAnterior[1]
     if flanco2>0:
       self.periodo2=time-self.flancoAnterior[1]
@@ -487,10 +508,98 @@ class FaseDetector(EncAnalizador):
       self.flancoAnterior[1]=time
     self.pulsoAnterior[0]=p1[ixP]
     self.pulsoAnterior[1]=p2[ixP]
-    # Filtro pasabajos:
-    self.desfase1 += self.zero_safe
-    self.desfase2 += self.zero_safe
-    self.signal = -self.desfase2**(-2)+self.desfase1**(-2)
+
+    # self.desfase1 += self.zero_safe
+    # self.desfase2 += self.zero_safe
+    # self.signal = -self.desfase2**(-2)+self.desfase1**(-2)
+    self.signal = -self.desfase1 if self.desfase1 < self.desfase2 else self.desfase2
+
+class PulseCounter(EncAnalizador):
+  def initUsuario(self, **kwargs):
+    self.step = {'enc1': 1./self.enc1.getResolucion(),
+                'enc2': 1./self.enc2.getResolucion()}
+    self.prev_pulse = {'enc1': (0,0,0), 'enc2': (0,0,0)}
+    self.counter = 0
+    logger.debug(f"PulseCounter steps: {self.step}")
+    
+  def analisis(self, **kwargs):
+    logger.debug('En PulseCounter.analisis: {}'.format(kwargs))
+    time = kwargs.get('time', self.time)
+    p1 = self.enc1.getPulsos()
+    p2 = self.enc2.getPulsos()
+    # counter is increased when a pulse in enc1 and decreased when a pulse in enc2.
+    for enc, pulse, sign in (('enc1',p1,1), ('enc2',p2,-1)):
+      if pulse[0] > self.prev_pulse[enc][0]:
+        if pulse[1]: # when advancing, channel-B is low when a rising edge in channel A
+          sign *= -1
+        self.counter += sign*self.step[enc]
+        # if self.counter > .5:
+        #   self.counter -= 1.
+        # elif self.counter < -.5:
+        #   self.counter += 1.
+    self.signal = self.counter
+    logger.debug(f"PulseCounter counter:{self.counter}\tp1:{p1}\tp2:{p2}")
+    
+    self.prev_pulse.update({'enc1': p1, 'enc2': p2})
+    
+
+class PulseTimer(EncAnalizador):
+  def initUsuario(self, **kwargs):
+    self.count = {'enc1': 0, 'enc2': 0}
+    self.count_time = {'enc1': [0.], 'enc2': [0.]}
+    self.prev_pulse = {'enc1': (0,0,0), 'enc2': (0,0,0)}
+    self.last_C = {'enc1': 0, 'enc2': 0}
+    self.res = {'enc1': self.enc1.getResolucion(),
+                'enc2': self.enc2.getResolucion()}
+
+  def analisis(self, **kwargs):
+    logger.debug('En PulseTimer.analisis: {}'.format(kwargs))
+    time = kwargs.get('time', self.time)
+    p1 = self.enc1.getPulsos()
+    p2 = self.enc2.getPulsos()
+
+    edge = False
+    
+    if p1[0] > self.prev_pulse['enc1'][0]: # rising edge on channel A of enc1
+      self.count_time['enc1'].append(time)
+      self.count['enc1'] += 1
+      edge = True      
+
+    if p2[0] > self.prev_pulse['enc2'][0]: # rising edge on channel A of enc2
+      self.count_time['enc2'].append(time)
+      self.count['enc2'] += 1
+      edge = True
+    
+    # 'enc1' and 'enc2' swap positions 
+    # to be 'this' and 'other' each time,
+    # and thus check for rising edges is issued.
+    for this, other, pulse in (('enc1','enc2',p1), ('enc2','enc1',p2)):
+      if pulse[2] > self.prev_pulse[this][2]: # rising edge in channel-C for this encoder
+        # this encoder resets to previous lap slice
+        if self.last_C[this] > 0:
+          self.count[this] -= self.last_C[this]
+          self.count_time[this] = self.count_time[this][self.last_C[this]:]
+        
+        self.last_C[this] = self.count[this]
+
+        # other encoder resets to last lap slice
+        if self.last_C[other] > 0:
+          self.count[other] -= self.last_C[other]
+          self.count_time[other] = self.count_time[other][self.last_C[other]:]
+          self.last_C[other] = 0
+
+    self.prev_pulse.update({'enc1': p1, 'enc2': p2})
+    if not edge:
+      return None
+
+    N = min(self.count.values())
+    log_counter.debug("N: {}".format(N))
+    log_counter.debug('count')
+    log_counter.debug(self.count)
+    # log_counter.debug('count_time')
+    # log_counter.debug(self.count_time)
+    self.signal = self.count_time['enc1'][N] - self.count_time['enc2'][N]
+
 
 class XORdetector(EncAnalizador):
     ''' '''
@@ -504,7 +613,7 @@ class XORdetector(EncAnalizador):
       self.pulsoReferencia=registro[0]
 
     def analisis(self, **kwargs):
-      logging.debug('En XORdetector.analisis: {}'.format(kwargs))
+      logger.debug('En XORdetector.analisis: {}'.format(kwargs))
       ixP = self.pulsoReferencia
       p1 = self.enc1.getPulsos()
       p2 = self.enc2.getPulsos()
@@ -527,7 +636,7 @@ class Signal():
   dirigido. Toma de entrada una lista de objetos EncAnalizardor
   '''
   def __init__(self, analizadores, **kwargs):
-    self.lista=analizadores
+    self.analizers=analizadores
     self.signal=kwargs.get('signal', 0.0)
     self.delta=0.0
     self.MAX_DELTA=kwargs.get('MAX_DELTA', False)
@@ -535,21 +644,21 @@ class Signal():
   def __call__(self, **kwargs):
     Dt = kwargs.get('Dt', 1.)
     delta = 0.0
-    for am in self.lista:
-      delta += am(**kwargs)
+    for analizer in self.analizers:
+      delta += analizer(**kwargs)
     self.delta = clip(delta, maximum=self.MAX_DELTA*Dt) if self.MAX_DELTA else delta
     self.signal += self.delta*Dt
     # self.signal = max((self.signal, 0.))
-    # logging.debug(self.delta*Dt, self.signal)
+    # logger.debug(self.delta*Dt, self.signal)
     return self.signal
 
   def getEstado(self):
-    bag = [ am.getEstado() for am in self.lista ]
+    bag = [ am.getEstado() for am in self.analizers ]
     return [ bag, self.signal, self.delta ]
 
   def setEstado(self, registro):
     bag, self.signal, self.delta = registro
-    for am, reg in zip(self.lista, bag):
+    for am, reg in zip(self.analizers, bag):
       am.setEstado(reg)
 
 def clip(o, maximum=False, minimum=False):
@@ -578,35 +687,36 @@ if __name__=='__main__':
 
   pickle_file = "registro005.pkl" #
   continuar=0
-  Dt=.05
-  MAXT=20
+  Dt=.01
+  MAXT=10
 
-  Res1=16
-  Res2=16
+  Res1=32
+  Res2=32
 
-  signal=1.
+  signal=0.01
   MAX_DELTA=100.
 
   # PID on channel A
-  K1 = 1.e0
-  PID1 = (.8, .3, .0)
+  K1 = 2.5e0
+  PID1 = (.9, .1, .1)
   filtro1 = 0.0
-  # FaseDetector on channel C
-  K2=.1e-1
-  PID2=(1.,0.4,0.01)
-  filtro2 = 0.0
+  # PulseCounter
+  K2=2.e-1
+  PID2=(1.,.1,.1)
+  filtro2 = 0.4
+  '''
   # EnFase on channel C
   K3=0.e4
   PID3=(1.,.0,.0)
   filtro3 = 0.1
   # PID on channel C
   K4=0.e1
-  PID4=(1.,.1,0.)
+  PID4=(1.,.1,.1)
   filtro4 = 0.6
-
-  def target(time,t=.2,b=.0,c=.15,T=1000.):
+  '''
+  def target(time,t=1.,b=.0,c=.6,T=200.):
     from math import sin
-    return t*(1+b*time**2/MAXT**2)+c*sin(time*6.28/T)**2
+    return t*(1-10**-time/MAXT/10)+c*sin(time*6.28/T)**2
 
   mot1 = MotorCombo(Res1,
                     [ TorqueDirecto(),
@@ -616,7 +726,7 @@ if __name__=='__main__':
   mot2 = MotorCombo(Res2,
                     [ TorqueDirecto(),
                       CargaVelocidad(),
-                      CargaAleatoria(distAleatoria=(2.,1.), filtro=0.6)],
+                      CargaAleatoria(distAleatoria=(1.,.1), filtro=0.0)],
                     [InerciaConstante()])
 
   ana1 = PID(enc1=mot1.getEncoder(),
@@ -626,11 +736,11 @@ if __name__=='__main__':
              PID=PID1,
              Dt=Dt)
 
-  ana2 = FaseDetector(enc1=mot1.getEncoder(),
+  ana2 = PulseCounter(enc1=mot1.getEncoder(),
                       enc2=mot2.getEncoder(),
                       peso=K2,
                       PID=PID2,
-                      referencia=2,
+                      # referencia=2,
                       Dt=Dt)
 
   # ana3 = EnFase(enc1=mot1.getEncoder(),
@@ -648,7 +758,7 @@ if __name__=='__main__':
   #            PID=PID2,
   #            Dt=Dt)
 
-  sen=Signal([ana1], # , ana2, ana3, ana4
+  sen=Signal([ana1, ana2], # , ana3, ana4
               MAX_DELTA=MAX_DELTA,
               signal=signal)
 
@@ -658,6 +768,7 @@ if __name__=='__main__':
 
   time = 0.0
 
+  # Load stored data to pickup a saved point.
   if continuar:
     cosas=pickle_load(pickle_file)
     for donde, que in zip(CajaDeZapatos, cosas[0]):
@@ -665,6 +776,8 @@ if __name__=='__main__':
     time = cosas[1]
     MAXT += time
 
+  # Execute this every timestep to compute 
+  # new positions and signals.
   def step(time):
     time+=Dt
     kwargs={'time':time, 'Dt':Dt}
@@ -674,24 +787,35 @@ if __name__=='__main__':
     mot2.roll(signal=reg, **kwargs)
     enc1 = mot1.getEncoder().getPulsos(shift=.1)
     enc2 = mot2.getEncoder().getPulsos()
-    integral = ana2.integral
-    derivat = ana2.derivada
-    prop = ana2.prop
-    return time, (reg, integral, derivat, prop, trg, enc1, enc2)
+    analizer = ana2
+    integral = analizer.integral
+    derivat = analizer.derivada
+    prop = analizer.prop
+    output = analizer.output
+    _, trg_vel, _ = mot1.eje.instantanea()
+    _, drv_vel, _ = mot2.eje.instantanea()
+    data = (reg, integral, derivat, prop, trg, enc1, enc2, trg_vel, drv_vel)
+    to_log = f"\t\t\t\tp:{prop:+6.2f} i:{integral:+6.2f} d:{derivat:+6.2f} o:{output:+6.2f}" +\
+             f"\t drvn vel: {drv_vel:+6.2f}"
+    log_counter.debug(to_log)
+    return time, data
 
+  # Empty lists for stored data.
   X=[]
   integral=[]; derivat = []; prop = []
   reg=[]; trg=[]
+  trg_vel, drv_vel = [], []
   enc1=[]; enc2=[]
-  lists = (reg, integral, derivat, prop, trg, enc1, enc2)
+  lists = (reg, integral, derivat, prop, trg, enc1, enc2, trg_vel, drv_vel)
 
+  # The very first timesteps are not displayed at all.
   while time<MAXT :
     time, new_values = step(time)
     X.append(time)
     for l_, val in zip(lists, new_values):
       l_.append(val)
 
-  logging.info("\nFinales: "+
+  logger.info("\nFinales: "+
                 "\nEje 1: {}".format(mot1.getEstado())+
                 "\nEje 2: {}".format(mot2.getEstado())+
                 "\nTime : {}".format(time)+
@@ -701,24 +825,33 @@ if __name__=='__main__':
   cosas += [time]
   pickle_save(pickle_file, cosas)
 
+  # Script for display starts here.
   import matplotlib.pyplot as plt
   from matplotlib.animation import FuncAnimation as FuncAn
 
-  fig, (ax1, ax2, ax3, ax4, _) = plt.subplots(5, 1, sharex=True)
-  ax2.set_ylim(-1.1,1.1)
+  fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, sharex=True)
+  ax2.set_ylim(-1,1)
+  ax3.set_ylim(0,4)
+  ax5.axis('off')
   ax5 = fig.add_subplot(529, projection='polar')
   ax6 = fig.add_subplot(5,2,10, projection='polar')
   A1, B1, Z1 = zip(*enc1)
   A2, B2, Z2 = zip(*enc2)
   ln11, ln12 = ax1.plot(X, A1, X, A2)
-  ln21, ln22, ln23 = ax2.plot(X, integral, X, derivat, X, prop)
-  ln31, ln32 = ax3.plot(X, trg, X, reg)
+  ln21, ln22, ln23 = ax2.plot(X, integral, 'r', X, derivat, 'g', X, prop, 'b')
+  ln31, ln32 = ax3.plot(X, trg_vel, X, drv_vel)
   ln41, ln42 = ax4.plot(X, Z1, X, Z2)
   ln5, = ax5.plot((mot1.eje.fase,)*2, (.1,1.), 'tab:blue')
   ln6, = ax6.plot((mot2.eje.fase,)*2, (.1,1.), 'tab:orange')
 
+  ax1.set_title('Encoders channel-A pulses')
+  ax2.set_title('PID signals')
+  ax3.set_title('Shafts velocities')
+  ax4.set_title('Encoders channel-C pulses')
+  ax5.set_title('Shafts phases')
+
   class Updater():
-    def __init__(self, time, step, batch=20):
+    def __init__(self, time, step, batch=400):
       self.time = time
       self.step = step # Function to get new values
       self.batch = batch
@@ -737,10 +870,10 @@ if __name__=='__main__':
       ln21.set_data(X, integral)
       ln22.set_data(X, derivat)
       ln23.set_data(X, prop)
-      ln31.set_data(X, trg)
-      ln32.set_data(X, reg)
+      ln31.set_data(X, trg_vel)
+      ln32.set_data(X, drv_vel)
       # ax3.autoscale(enable=True, axis='y')
-      ax3.set_ylim(-.2+min(min(trg),min(reg)),.2+max(max(trg),max(reg)))
+      # ax3.set_ylim(-.2+min(min(trg),min(reg)),.2+max(max(trg),max(reg)))
       ln41.set_data(X, Z1)
       ln42.set_data(X, Z2)
       ln5.set_data((fase1,)*2, (.1,1.))

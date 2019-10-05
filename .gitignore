@@ -1,0 +1,12 @@
+# vscode settings
+/.vscode
+
+# virtualenv folder
+/venv
+
+# picle and debugging files
+*.pkl
+*.debug
+debug.*
+
+*.pyc
